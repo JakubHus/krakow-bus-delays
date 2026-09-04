@@ -1,0 +1,15 @@
+# dane
+data/
+*.pb
+*.zip
+*.parquet
+
+# środowisko i IDE
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+# lokalne
+*.log
+.env
