@@ -62,3 +62,54 @@ def parse_trip_updates(feed: gtfs_realtime_pb2.FeedMessage,
                 "stop_schedule_relationship": stu.schedule_relationship if stu.HasField("schedule_relationship") else None,
             })
     return rows
+
+def parse_vehicle_positions(feed: gtfs_realtime_pb2.FeedMessage,
+                            observed_at: int,
+                            feed_code: str) -> list[dict]:
+    """
+    Zamienia komunikat VehiclePositions na listę wierszy.
+    Jeden wiersz = jeden pojazd (pojedyncza pozycja GPS)
+
+    :param feed: rozpakowany komunikat GTFS-RT
+    :param observed_at: epoch UTC momentu pobrania (czas zebrania)
+    :param feed_code: kod feedu (A/M/T), zapisywany w każdym wierszu
+    :return: lista słowników, każdy to jeden pojazd
+    """
+    header_ts = feed.header.timestamp or None
+    rows = []
+
+    for entity in feed.entity:
+        if not entity.HasField("vehicle"):
+            continue
+        vp = entity.vehicle
+        trip = vp.trip if vp.HasField("trip") else None
+        pos = vp.position if vp.HasField("position") else None
+        vehicle = vp.vehicle if vp.HasField("vehicle") else None
+
+        rows.append({
+            "observed_at": observed_at,
+            "header_ts": header_ts,
+            "feed": feed_code,
+            "trip_id": (trip.trip_id or None) if trip else None,
+            "route_id": (trip.route_id or None) if trip else None,
+            "direction_id": trip.direction_id if trip and trip.HasField("direction_id") else None,
+
+            "latitude": pos.latitude if pos else None,
+            "longitude": pos.longitude if pos else None,
+            "bearing": pos.bearing if pos and pos.HasField("bearing") else None,
+            "speed": pos.speed if pos and pos.HasField("speed") else None,
+
+            # status na trasie
+            "current_stop_sequence": vp.current_stop_sequence if vp.HasField("current_stop_sequence") else None,
+            "current_status": vp.current_status if vp.HasField("current_status") else None,
+            "stop_id": vp.stop_id or None,
+
+            # własny znacznik czasu pojazdu
+            "vehicle_timestamp": vp.timestamp if vp.HasField("timestamp") else None,
+            "vehicle_id": (vehicle.id or None) if vehicle else None,
+            "vehicle_label": (vehicle.label or None) if vehicle else None,
+
+            # zapełnienie autobusu
+            "occupancy_status": vp.occupancy_status if vp.HasField("occupancy_status") else None,
+        })
+    return rows

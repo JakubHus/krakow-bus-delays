@@ -1,7 +1,11 @@
 """Test parsera GTFS-RT"""
 
 from google.transit import gtfs_realtime_pb2
-from src.collector.parse import parse_trip_updates, _clean_time
+from src.collector.parse import (
+    parse_trip_updates,
+    parse_vehicle_positions,
+    _clean_time
+)
 
 def _build_feed_with_one_trip():
     """Buduje sztuczny komunikat z jednym kursem o dwóch przystankach"""
@@ -76,3 +80,56 @@ def test_clean_time_helper():
     """Bezpośredni test funkcji pomocniczej"""
     assert _clean_time(0) is None
     assert _clean_time(1788545640) == 1788545640
+
+
+def _build_vehicle_feed():
+    """Sztuczny komunikat VehiclePositions"""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1788556784
+
+    entity = feed.entity.add()
+    entity.id = "vehicle_DA155"
+    vp = entity.vehicle
+    vp.trip.trip_id = "20260901_4_127904828_33"
+    vp.trip.route_id = "175"
+    vp.trip.direction_id = 0
+    vp.position.latitude = 49.9828
+    vp.position.longitude = 19.9206791
+    vp.position.bearing = 20
+    vp.position.speed = 8
+    vp.current_stop_sequence = 11
+    vp.current_status = gtfs_realtime_pb2.VehiclePosition.IN_TRANSIT_TO
+    vp.stop_id = "10226"
+    vp.timestamp = 1788556776
+    vp.vehicle.id = "DA155"
+    vp.vehicle.label = "155"
+    vp.occupancy_status = gtfs_realtime_pb2.VehiclePosition.NO_DATA_AVAILABLE
+
+    return feed
+
+
+def test_vehicle_one_row_per_vehicle():
+    """Jeden pojazd -> jeden wiersz"""
+    rows = parse_vehicle_positions(_build_vehicle_feed(), 1788556790, "A")
+    assert len(rows) == 1
+
+def test_vehicle_coordinates_use_approx():
+    """Sprawdzenie przybliżonych wartości koordynatów"""
+    import pytest
+    rows = parse_vehicle_positions(_build_vehicle_feed(), 1788556790, "A")
+    assert rows[0]["latitude"] == pytest.approx(49.9828, abs=1e-4)
+    assert rows[0]["longitude"] == pytest.approx(19.920679, abs=1e-4)
+
+def test_vehicle_status_and_occupancy_kept_raw():
+    """Surowy zapis statusu i zapełnienia autobusu"""
+    rows = parse_vehicle_positions(_build_vehicle_feed(), 1788556790, "A")
+    assert rows[0]["occupancy_status"] == gtfs_realtime_pb2.VehiclePosition.NO_DATA_AVAILABLE
+    assert rows[0]["current_status"] == gtfs_realtime_pb2.VehiclePosition.IN_TRANSIT_TO
+
+def test_vehicle_metadata():
+    rows = parse_vehicle_positions(_build_vehicle_feed(), 1788556790, "A")
+    assert rows[0]["observed_at"] == 1788556790
+    assert rows[0]["feed"] == "A"
+    assert rows[0]["header_ts"] == 1788556784
+    assert rows[0]["vehicle_timestamp"] == 1788556776
