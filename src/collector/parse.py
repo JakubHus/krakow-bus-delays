@@ -11,6 +11,17 @@ def _clean_time(value: int) -> int | None:
     """
     return value if value != 0 else None
 
+def _first_translation(translated_string) -> str | None:
+    """
+    Wyłuskuje tekst z pola TranslatedString (header_text, description_text, url).
+    ZTP nie oznacza języka etykietą, więc bierzemy pierwsze dostępne tłumaczenie.
+    Gdy tekstu nie ma - None.
+    """
+    if not translated_string.translation:
+        return None
+    return translated_string.translation[0].text or None
+
+
 def parse_trip_updates(feed: gtfs_realtime_pb2.FeedMessage,
                        observed_at: int,
                        feed_code: str) -> list[dict]:
@@ -112,4 +123,60 @@ def parse_vehicle_positions(feed: gtfs_realtime_pb2.FeedMessage,
             # zapełnienie autobusu
             "occupancy_status": vp.occupancy_status if vp.HasField("occupancy_status") else None,
         })
+    return rows
+
+
+def parse_service_alerts(feed: gtfs_realtime_pb2.FeedMessage,
+                         observed_at: int,
+                         feed_code: str) -> list[dict]:
+    """
+    Zamienia komunikat ServiceAlerts na listę wierszy.
+    Jeden wiersz = jedna para (alert, encja).
+    Alert bez encji -> jeden wiersz z pustymi polami informed_*,
+    żeby sam alert nie zniknął.
+
+    :param feed: rozpakowany komunikat GTFS-RT
+    :param observed_at: epoch UTC momentu pobrania (czas zebrania)
+    :param feed_code: kod feedu (A/M/T)
+    :return: lista słowników, pusta gdy brak alertów
+    """
+    header_ts = feed.header.timestamp or None
+    rows = []
+
+    for entity in feed.entity:
+        if not entity.HasField("alert"):
+            continue
+        alert = entity.alert
+
+        # pola wspólne dla całego alertu
+        alert_fields = {
+            "observed_at": observed_at,
+            "header_ts": header_ts,
+            "feed": feed_code,
+            "alert_id": entity.id or None,
+            "cause": alert.cause if alert.HasField("cause") else None,
+            "effect": alert.effect if alert.HasField("effect") else None,
+            "header_text": _first_translation(alert.header_text),
+            "description_text": _first_translation(alert.description_text)
+        }
+
+        if len(alert.informed_entity) == 0:
+            # Alert bez wskazanej encji -> zapisujemy sam alert, pola puste
+            rows.append({
+                **alert_fields,
+                "informed_agency_id": None,
+                "informed_route_id": None,
+                "informed_stop_id": None,
+                "informed_trip_id": None
+            })
+        else:
+            # Jeden wiersz za każdą encję
+            for ie in alert.informed_entity:
+                rows.append({
+                    **alert_fields,
+                    "informed_agency_id": ie.agency_id or None,
+                    "informed_route_id": ie.route_id or None,
+                    "informed_stop_id": ie.stop_id or None,
+                    "informed_trip_id": (ie.trip.trip_id or None) if ie.HasField("trip") else None,
+                })
     return rows

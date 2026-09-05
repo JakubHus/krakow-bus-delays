@@ -4,6 +4,7 @@ from google.transit import gtfs_realtime_pb2
 from src.collector.parse import (
     parse_trip_updates,
     parse_vehicle_positions,
+    parse_service_alerts,
     _clean_time
 )
 
@@ -133,3 +134,59 @@ def test_vehicle_metadata():
     assert rows[0]["feed"] == "A"
     assert rows[0]["header_ts"] == 1788556784
     assert rows[0]["vehicle_timestamp"] == 1788556776
+
+
+def _build_alert_feed(with_entities=True):
+    """Sztuczny ServiceAlerts"""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1788561398
+
+    entity = feed.entity.add()
+    entity.id = "alert_test_1"
+    alert = entity.alert
+
+    alert.header_text.translation.add().text = "Objazd"
+    alert.description_text.translation.add().text = "Wyłączenie ruchu tramwajowego"
+
+    if with_entities:
+        alert.informed_entity.add().route_id = "5"
+        alert.informed_entity.add().route_id = "8"
+        alert.informed_entity.add().stop_id = "10200"
+
+    return feed
+
+
+def test_alert_multiplies_into_rows():
+    """Alert o 3 encjach -> 3 wiersze"""
+    rows = parse_service_alerts(_build_alert_feed(), 1788561400, "T")
+    assert len(rows) == 3
+
+def test_alert_shared_text_repeated():
+    """Opis alertu powtarza się w każdym wygenerowanym wierszu"""
+    rows = parse_service_alerts(_build_alert_feed(), 1788561400, "T")
+    assert all(r["description_text"] == "Wyłączenie ruchu tramwajowego" for r in rows)
+    assert all(r["header_text"] == "Objazd" for r in rows)
+
+def test_alert_informed_entities_split():
+    """Każda encja trafia do osobnego wiersza"""
+    rows = parse_service_alerts(_build_alert_feed(), 1788561400, "T")
+    assert rows[0]["informed_route_id"] == "5"
+    assert rows[1]["informed_route_id"] == "8"
+    assert rows[2]["informed_stop_id"] == "10200"
+    # przystanek nie ma route_id i odwrotnie
+    assert rows[2]['informed_route_id'] is None
+
+def test_alert_without_entities_still_one_row():
+    """Alert bez żadnej encji -> i tak mamy jeden wiersz żeby alert nie zniknął"""
+    rows = parse_service_alerts(_build_alert_feed(with_entities=False), 1788561400, "T")
+    assert len(rows) == 1
+    assert rows[0]["informed_route_id"] is None
+    assert rows[0]["description_text"] == "Wyłączenie ruchu tramwajowego"
+
+def test_empty_feed_returns_empty_list():
+    """Brak alertów -> pusta lista, bez błędu"""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    rows = parse_service_alerts(feed, 1788561400, "T")
+    assert rows == []
