@@ -26,3 +26,6 @@ HEALTH_MAX_ERRORS_IN_WINDOW = 8        # tyle błędów w oknie = awaria przeryw
 # --- Pętla kolektora ---
 POLL_INTERVAL_SECONDS = 15    # odstęp między cyklami pobierania
 HEALTH_HISTORY_SIZE = 60      # ile ostatnich wyników trzymać do oceny zdrowia
+
+# --- Rozkład statyczny ---
+STATIC_CHECK_INTERVAL_SECONDS = 86400   # sprawdzaj rozkład raz na dobę (24h)

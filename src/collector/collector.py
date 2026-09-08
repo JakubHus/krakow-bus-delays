@@ -22,8 +22,10 @@ from src.collector.config import (
     FEED_CODES,
     RT_DATASETS,
     POLL_INTERVAL_SECONDS,
-    HEALTH_HISTORY_SIZE
+    HEALTH_HISTORY_SIZE,
+    STATIC_CHECK_INTERVAL_SECONDS
 )
+from src.collector.static_schedule import archive_if_new
 
 # Tabelka: typ danych → funkcja parsera.
 # Wszystkie parsery mają tę samą sygnaturę (feed, observed_at, feed_code),
@@ -126,18 +128,32 @@ def run_one_cycle(base_dir: Path, logs_dir: Path) -> tuple[list[bool], list[bool
 log = logging.getLogger("collector")
 
 
+def check_static_schedules(static_dir: Path) -> None:
+    """
+    Sprawdza i archiwizuje rozkład statyczny dla wszystkich feedów.
+    Wywoływana rzadko (raz na dobę), nie w każdym cyklu.
+
+    :param static_dir: katalog na rozkłady
+    """
+    for feed_code in FEED_CODES:
+        archive_if_new(feed_code, static_dir)
+
+
 def run_forever(base_dir: Path,
                 logs_dir: Path,
+                static_dir: Path,
                 max_cycles: int | None = None) -> None:
     """
     Uruchamia kolektor w pętli ciągłej.
 
     Po każdym cyklu ocenia poprwność pobierania i loguje ostrzeżenie,
-    gdy jest źle. Można to zatrzymać (Ctrl+C / SIGTERM): dokańcza
+    gdy jest źle. Raz na dobę (oraz na starcie) sprawdza i archiwizuje
+    rozkład statyczny. Można to zatrzymać (Ctrl+C / SIGTERM): dokańcza
     bieżący cykl i wychodzi.
 
     :param base_dir: katalog bazowy na dane surowe
     :param logs_dir: katalog bazowy na logi
+    :param static_dir: katalog bazowy na logi
     :param max_cycles: ile cykli wykonać (None = w nieskończoność).
                        Parametr istnieje głównie po to, by dało się to testować.
     """
@@ -156,6 +172,10 @@ def run_forever(base_dir: Path,
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
+    # Rozkład sprawdzamy na starcie, a potem raz na dobę
+    check_static_schedules(static_dir)
+    last_static_check = time.time()
+
     cycle_count = 0
     while not should_stop["value"]:
         fetch_outcomes, parse_outcomes = run_one_cycle(base_dir, logs_dir)
@@ -171,6 +191,11 @@ def run_forever(base_dir: Path,
             log.warning("Wykryto problem z pobieraniem — sprawdź połączenie/ZTP")
         if is_unhealthy(parse_history):
             log.warning("Wykryto problem z parsowaniem — możliwa zmiana formatu feedu")
+
+        # Czy minęła doba od ostatniego sprawdzenia rozkładu
+        if time.time() - last_static_check >= STATIC_CHECK_INTERVAL_SECONDS:
+            check_static_schedules(static_dir)
+            last_static_check = time.time()
 
         cycle_count += 1
         if max_cycles is not None and cycle_count >= max_cycles:

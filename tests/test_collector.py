@@ -165,12 +165,14 @@ def test_run_forever_stops_after_max_cycles(tmp_path):
     content = _build_trip_updates_bytes()
     raw_dir = tmp_path / "raw"
     logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
 
     # Mockujemy sieć (sukces) oraz sleep (żeby test nie czekał naprawdę)
     with patch("src.collector.fetch.requests.get",
                return_value=_fake_ok_response(content)), \
+         patch("src.collector.collector.check_static_schedules"), \
          patch("src.collector.collector.time.sleep") as mock_sleep:
-        run_forever(raw_dir, logs_dir, max_cycles=3)
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=3)
 
     # 3 cykle -> sleep wywołany 2 razy (po ostatnim cyklu nie śpimy)
     assert mock_sleep.call_count == 2
@@ -181,11 +183,12 @@ def test_run_forever_writes_data_each_cycle(tmp_path):
     content = _build_trip_updates_bytes()
     raw_dir = tmp_path / "raw"
     logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
 
     with patch("src.collector.fetch.requests.get",
                return_value=_fake_ok_response(content)), \
          patch("src.collector.collector.time.sleep"):
-        run_forever(raw_dir, logs_dir, max_cycles=2)
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=2)
 
     # log powstał i ma wpisy z dwóch cykli: 2 * 9 prób = 18
     import pandas as pd
@@ -199,12 +202,13 @@ def test_run_forever_unhealthy_warns(tmp_path, caplog):
     import logging
     raw_dir = tmp_path / "raw"
     logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
 
     with patch("src.collector.fetch.requests.get",
                side_effect=requests.exceptions.ConnectTimeout("timeout")), \
          patch("src.collector.collector.time.sleep"), \
          caplog.at_level(logging.WARNING):
-        run_forever(raw_dir, logs_dir, max_cycles=5)
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=5)
 
     # gdzieś padło ostrzeżenie o problemie z pobieraniem
     assert any("problem z pobieraniem" in msg.lower() for msg in caplog.messages)
@@ -228,3 +232,20 @@ def test_collect_one_feed_corrupt_data_survives(tmp_path):
     assert result.parse_ok is False
     # żaden plik nie powstał, bo nie było czego zapisać
     assert list(tmp_path.rglob("*.parquet")) == []
+
+
+def test_run_forever_checks_static_on_start(tmp_path):
+    """Rozkład statyczny sprawdzany jest raz na starcie pętli"""
+    content = _build_trip_updates_bytes()
+    raw_dir = tmp_path / "raw"
+    logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
+
+    with patch("src.collector.fetch.requests.get",
+               return_value=_fake_ok_response(content)), \
+         patch("src.collector.collector.check_static_schedules") as mock_check, \
+         patch("src.collector.collector.time.sleep"):
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=1)
+
+    # sprawdzenie rozkładu wywołane co najmniej raz (na starcie)
+    assert mock_check.call_count >= 1

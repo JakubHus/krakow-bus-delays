@@ -16,6 +16,7 @@ from src.collector.collector import run_forever
 DATA_DIR = Path("data")
 RAW_DIR = DATA_DIR / "raw"
 LOGS_DIR = DATA_DIR / "logs"
+STATIC_DIR = DATA_DIR / "static"
 
 def main():
     parser = argparse.ArgumentParser(description="Kolektor GTFS-RT ZTP Kraków")
@@ -39,7 +40,7 @@ def main():
     if args.cycles:
         log.info("Tryb testowy: %d cykli", args.cycles)
 
-    run_forever(RAW_DIR, LOGS_DIR, max_cycles=args.cycles)
+    run_forever(RAW_DIR, LOGS_DIR, STATIC_DIR, max_cycles=args.cycles)
 
     log.info("Kolektor zakończył pracę")
 
