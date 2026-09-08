@@ -53,7 +53,7 @@ def parse_trip_updates(feed: gtfs_realtime_pb2.FeedMessage,
             "route_id": trip.route_id or None,
             "direction_id": trip.direction_id if trip.HasField("direction_id") else None,
             "start_date": trip.start_date or None,
-            "trip_shedule_relationship": trip.trip_shedule_relationship if trip.HasField("schedule_relationship") else None,
+            "trip_schedule_relationship": trip.schedule_relationship if trip.HasField("schedule_relationship") else None,
             "vehicle_id": (vehicle.id or None) if vehicle else None,
             "vehicle_label": (vehicle.label or None) if vehicle else None
         }

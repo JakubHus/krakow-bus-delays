@@ -20,6 +20,7 @@ def _build_feed_with_one_trip():
     tu.trip.trip_id = "20260901_test_1"
     tu.trip.route_id = "476"
     tu.trip.direction_id = 1
+    tu.trip.schedule_relationship = gtfs_realtime_pb2.TripDescriptor.SCHEDULED
     tu.vehicle.id = "PA147"
     tu.vehicle.label = "147"
 
