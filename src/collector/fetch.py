@@ -8,7 +8,7 @@ import requests
 from src.collector.config import USER_AGENT, BASE_URL, RT_DATASETS
 
 @dataclass
-class Fetchresult:
+class FetchResult:
     """
     Wynik jednej próby pobrania. Zawsze zwracany (przy błędzie też).
 
@@ -31,7 +31,7 @@ class Fetchresult:
     duration_ms: float | None = None
 
 
-def fetch_url(url: str, timeout: int = 20) -> Fetchresult:
+def fetch_url(url: str, timeout: int = 20) -> FetchResult:
     """
     Pobiera zawartość z danego URL. Nigdy nie rzuca wyjątku (błąd sieci,
     timeout czy zły kod HTTP zwraca jako FetchResult z ok=False).
@@ -51,7 +51,7 @@ def fetch_url(url: str, timeout: int = 20) -> Fetchresult:
         # Zły kod HTTP (4xx, 5xx) traktujemy jako błąd, ale kontrolowany
         resp.raise_for_status()
 
-        return Fetchresult(
+        return FetchResult(
             ok=True,
             url=url,
             observed_at=observed_at,
@@ -66,7 +66,7 @@ def fetch_url(url: str, timeout: int = 20) -> Fetchresult:
         # Jeśli wiadomość w ogóle nadeszła dołączamy jej kod HTTP
         status = exc.response.status_code if exc.response is not None else None
 
-        return Fetchresult(
+        return FetchResult(
             ok=False,
             url=url,
             observed_at=observed_at,
@@ -93,7 +93,7 @@ def build_feed_url(dataset: str, feed_code: str) -> str:
     return f"{BASE_URL}/{prefix}_{feed_code}.pb"
 
 
-def fetch_feed(dataset: str, feed_code: str, timeout: int = 20) -> Fetchresult:
+def fetch_feed(dataset: str, feed_code: str, timeout: int = 20) -> FetchResult:
     """
     Pobiera konkretny feed GTFS-RT (składa URL i pobiera).
 

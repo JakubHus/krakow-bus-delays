@@ -3,21 +3,23 @@
 import csv
 from pathlib import Path
 
-from src.collector.fetch import Fetchresult
+from src.collector.fetch import FetchResult
+from src.collector.collector import CollectResult
 from src.collector.logbook import append_to_logbook
 
 
-def _make_result(ok=True, observed_at=1788561398, error=None):
-    """Pomocnik: tworzy FetchResult do testów."""
-    return Fetchresult(
-        ok=ok,
+def _make_result(fetch_ok=True, parse_ok=True, observed_at=1788561398, error=None):
+    """Pomocnik: tworzy CollectResult do testów."""
+    fr = FetchResult(
+        ok=fetch_ok,
         url="https://przyklad.pl/TripUpdates_A.pb",
         observed_at=observed_at,
-        status_code=200 if ok else None,
-        size_bytes=25510 if ok else None,
+        status_code=200 if fetch_ok else None,
+        size_bytes=25510 if fetch_ok else None,
         error=error,
         duration_ms=42.0,
     )
+    return CollectResult(fetch_ok=fetch_ok, parse_ok=parse_ok, fetch_result=fr)
 
 
 def _read_csv(path):
@@ -64,14 +66,14 @@ def test_append_does_not_duplicate_header(tmp_path):
 
 
 def test_logs_errors_too(tmp_path):
-    """Log zapisuje też nieudane próby, z treścią błędu."""
+    """Log zapisuje też nieudane próby, z treścią błędu i typem outcome"""
     results = [
-        ("trip_updates", "A", _make_result(ok=False, error="ConnectTimeout: timeout")),
+        ("trip_updates", "A", _make_result(fetch_ok=False, parse_ok=None, error="ConnectTimeout: timeout")),
     ]
     log_path = append_to_logbook(results, tmp_path)
 
     rows = _read_csv(log_path)
-    assert rows[0]["ok"] == "False"
+    assert rows[0]["outcome"] == "fetch_error"
     assert "ConnectTimeout" in rows[0]["error"]
 
 
@@ -79,3 +81,14 @@ def test_empty_results_returns_none(tmp_path):
     """Pusta lista → None, żaden plik nie powstaje."""
     result = append_to_logbook([], tmp_path)
     assert result is None
+
+
+def test_logs_parse_error_distinctly(tmp_path):
+    """Błąd parsowania jest w logu oznaczony jako 'parse_error', nie 'fetch_error''"""
+    results = [
+        ("trip_updates", "A", _make_result(fetch_ok=True, parse_ok=False)),
+    ]
+    log_path = append_to_logbook(results, tmp_path)
+
+    rows = _read_csv(log_path)
+    assert rows[0]["outcome"] == "parse_error"

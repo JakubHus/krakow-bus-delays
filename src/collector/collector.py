@@ -4,10 +4,11 @@ from pathlib import Path
 import time
 import signal
 import logging
+from dataclasses import dataclass
 
 from google.transit import gtfs_realtime_pb2
 
-from src.collector.fetch import fetch_feed, Fetchresult
+from src.collector.fetch import fetch_feed, FetchResult
 from src.collector.parse import (
     parse_trip_updates,
     parse_vehicle_positions,
@@ -34,66 +35,92 @@ PARSERS = {
 }
 
 
+@dataclass
+class CollectResult:
+    """
+    Wynik obsługi jednego feedu, który rozróznia 3 stany:
+        - pobrano i sparsowano      -> fetch_ok=True, parse_ok=True
+        - pobrano i błąd parsowania -> fetch_ok=True, parse_ok=False
+        - nie pobrano               -> fetch_ok=False, parse_ok=None
+
+    :param fetch_ok: czy pobieranie się powiodło
+    :param parse_ok: czy parsowanie się powiodło (None gdy pobieranie się nie powiodło)
+    :param fetch_result: oryginalny wynik pobrania (do logu)
+    """
+    fetch_ok: bool
+    parse_ok: bool | None
+    fetch_result: FetchResult
+
+
 def collect_one_feed(dataset: str,
                      feed_code: str,
-                     base_dir: Path) -> Fetchresult:
+                     base_dir: Path) -> FetchResult:
     """
     Obsługuje jeden feed: pobiera, parsuje i zapisuje.
 
-    Zwraca wynik pobierania (FetchResult) potrzebny do logu i oceny poprawności.
-    Gdy pobranie się nie powiodło, parsowania i zapisu nie ma, ale funkcja
-    i tak zwraca wynik (z ok=False), żeby kolektor mógł go zanotować.
+    Nigdy nie rzuca wyjatku. Zarówno błąd pobierania i błąd parsowania
+    (np. obcięty plik z serwera) są łapane i zwracane jako CollectResult,
+    żeby jeden zły feed nie przerwał całego cyklu.
 
     :param dataset: typ danych (klucz z PARSERS)
     :param feed_code: kod feedu (A/M/T)
     :param base_dir: katalog bazowy na dane surowe
-    :return: FetchResult z próby pobrania
+    :return: CollectorResult z trójstanowym wynikiem
     """
-    # 1. Pobranie. Nigdy nie rzuca tylko zwraca wynik z ok=True/False.
+    # 1. Pobranie. Nie rzuca — zwraca FetchResult z ok=True/False.
     result = fetch_feed(dataset, feed_code)
 
-    # Pobranie się nie udało -> nie ma czego parsować. Zwracamy wynik do logu.
     if not result.ok:
-        return result
+        # Nie pobrano — nie ma czego parsować.
+        return CollectResult(fetch_ok=False, parse_ok=None, fetch_result=result)
 
-    # 2. Parsowanie -> rozpakowujemy bajty i wybieramy parser ze słownika.
-    feed = gtfs_realtime_pb2.FeedMessage()
-    feed.ParseFromString(result.content)
+    # 2. Parsowanie. TU może się wywalić na obciętym/wadliwym pliku —
+    #    łapiemy błąd, żeby nie zabił całego cyklu.
+    try:
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.ParseFromString(result.content)
+        parser = PARSERS[dataset]
+        rows = parser(feed, result.observed_at, feed_code)
+    except Exception as exc:
+        log.warning("Błąd parsowania %s/%s: %s", dataset, feed_code, exc)
+        return CollectResult(fetch_ok=True, parse_ok=False, fetch_result=result)
 
-    parser = PARSERS[dataset]
-    rows = parser(feed, result.observed_at, feed_code)
-
-    # 3. Zapis. save_dataset sam ogarnia pustą listę (zwróci None).
+    # 3. Zapis. save_dataset sam ogarnia pustą listę.
     save_dataset(rows, base_dir, dataset, feed_code, result.observed_at)
 
-    return result
+    return CollectResult(fetch_ok=True, parse_ok=True, fetch_result=result)
 
 
-def run_one_cycle(base_dir: Path, logs_dir: Path) -> list[bool]:
+def run_one_cycle(base_dir: Path, logs_dir: Path) -> tuple[list[bool], list[bool]]:
     """
-    Wykonuje jeden pełny cykl: wszystkie typy danych × wszystkie feedy.
+    Wykonuje jeden pełny cykl: wszystkie typy danych * wszystkie feedy.
 
-    Dla każdej kombinacji pobiera, parsuje i zapisuje. Zbiera wyniki pobrań,
-    dopisuje je do logu kompletności i zwraca listę sukcesów/porażek
-    (do oceny poprawności przez moduł health).
+    Zwraca dwie osobne historie wyników do niezależnej oceny poprawności:
+      - sieci (czy pobranie się udało)
+      - parsowania (czy udało się rozłożyć pobrane dane)
 
     :param base_dir: katalog bazowy na dane surowe
     :param logs_dir: katalog bazowy na logi
-    :return: lista wyników pobrań (True=sukces, False=błąd) z tego cyklu
+    :return: (wyniki_sieci, wyniki_parsowania) — dwie listy True/False
     """
-    log_entries = [] # (dataset, feed_code, FetchResult) do logu
-    outcomes = [] # True/False do oceny poprawności
+    log_entries = []
+    fetch_outcomes = []   # True/False — czy pobrano
+    parse_outcomes = []   # True/False — czy sparsowano (tylko dla pobranych)
 
     for dataset in RT_DATASETS:
         for feed_code in FEED_CODES:
             result = collect_one_feed(dataset, feed_code, base_dir)
             log_entries.append((dataset, feed_code, result))
-            outcomes.append(result.ok)
 
-    # Jeden zapis do logu na cały cykl (wszystkie 9 prób naraz).
+            fetch_outcomes.append(result.fetch_ok)
+            # Parsowanie oceniamy tylko wtedy, gdy w ogóle pobrano.
+            # Gdy nie pobrano (parse_ok=None), nie zaśmiecamy historii parsowania.
+            if result.parse_ok is not None:
+                parse_outcomes.append(result.parse_ok)
+
     append_to_logbook(log_entries, logs_dir)
 
-    return outcomes
+    return fetch_outcomes, parse_outcomes
 
 
 log = logging.getLogger("collector")
@@ -115,7 +142,8 @@ def run_forever(base_dir: Path,
                        Parametr istnieje głównie po to, by dało się to testować.
     """
     # Historia ostatnich wyników (True/False) do oceny poprawności
-    history: list[bool] = []
+    fetch_history: list[bool] = []
+    parse_history: list[bool] = []
 
     # Flaga zatrzymania, sygnał ją podniesie, pętla ją sprawdzi
     should_stop = {"value": False}
@@ -130,15 +158,19 @@ def run_forever(base_dir: Path,
 
     cycle_count = 0
     while not should_stop["value"]:
-        outcomes = run_one_cycle(base_dir, logs_dir)
+        fetch_outcomes, parse_outcomes = run_one_cycle(base_dir, logs_dir)
 
         # Dokładamy wyniki do historii, przycinając ją do ostatnich N
-        history.extend(outcomes)
-        history = history[-HEALTH_HISTORY_SIZE:]
+        fetch_history.extend(fetch_outcomes)
+        fetch_history = fetch_history[-HEALTH_HISTORY_SIZE:]
+        parse_history.extend(parse_outcomes)
+        parse_history = parse_history[-HEALTH_HISTORY_SIZE:]
 
         # Ocena poprawności, na razie tylko ostrzeżenie w logu
-        if is_unhealthy(history):
+        if is_unhealthy(fetch_history):
             log.warning("Wykryto problem z pobieraniem — sprawdź połączenie/ZTP")
+        if is_unhealthy(parse_history):
+            log.warning("Wykryto problem z parsowaniem — możliwa zmiana formatu feedu")
 
         cycle_count += 1
         if max_cycles is not None and cycle_count >= max_cycles:

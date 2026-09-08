@@ -4,12 +4,13 @@ import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.collector.fetch import Fetchresult
+from src.collector.fetch import FetchResult
 
 # Stała kolejność kolumn w pliku CSV, aby log był spójny między dniami
 LOG_COLUMNS = [
     "observed_at",
     "ok",
+    "outcome",
     "dataset",
     "feed",
     "url",
@@ -20,10 +21,15 @@ LOG_COLUMNS = [
 ]
 
 
-def append_to_logbook(results: list[tuple[str, str, Fetchresult]],
+def append_to_logbook(results: list[tuple[str, str, "CollectResult"]],
                       logs_dir: Path) -> Path | None:
     """
     Dopisuje wyniki pobrań do dziennego pliku CSV (log kompletności).
+
+    Rozróżnia trzy wyniki w kolumnie 'outcome':
+        - "ok"          - pobrano i sparsowano
+        - "fetch_error" - nie udało się pobrać
+        - "parse_error" - pobrano, ale nie udało się sparsować
 
     Nagłówek zapisywany jest tylko przy tworzeniu pliku, nie przy dopisywaniu.
     Plik jest partycjonowany po dacie: logs_dir/date=YYYY-MM-DD/poll_log.csv
@@ -36,8 +42,8 @@ def append_to_logbook(results: list[tuple[str, str, Fetchresult]],
         return None
 
     # Datę pliku bierzemy z pierwszego wyniku (moment pobrania, UTC)
-    first_result = results[0][2]
-    dt = datetime.fromtimestamp(first_result.observed_at, tz=timezone.utc)
+    first_fetch = results[0][2].fetch_result
+    dt = datetime.fromtimestamp(first_fetch.observed_at, tz=timezone.utc)
 
     log_dir = logs_dir / f"date={dt:%Y-%m-%d}"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -51,17 +57,28 @@ def append_to_logbook(results: list[tuple[str, str, Fetchresult]],
         if write_header:
             writer.writeheader()
 
-        for dataset, feed_code, result in results:
+        for dataset, feed_code, collect_result in results:
+            fr = collect_result.fetch_result
+
+            # wynik
+            if not collect_result.fetch_ok:
+                outcome = "fetch_error"
+            elif collect_result.parse_ok is False:
+                outcome = "parse_error"
+            else:
+                outcome = "ok"
+
             writer.writerow({
-                "observed_at": result.observed_at,
-                "ok": result.ok,
+                "observed_at": fr.observed_at,
+                "ok": collect_result.fetch_ok and (collect_result.parse_ok is not False),
+                "outcome": outcome,
                 "dataset": dataset,
                 "feed": feed_code,
-                "url": result.url,
-                "status_code": result.status_code,
-                "size_bytes": result.size_bytes,
-                "duration_ms": result.duration_ms,
-                "error": result.error
+                "url": fr.url,
+                "status_code": fr.status_code,
+                "size_bytes": fr.size_bytes,
+                "duration_ms": fr.duration_ms,
+                "error": fr.error
             })
 
     return log_path

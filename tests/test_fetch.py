@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 import requests
 import pytest
 
-from src.collector.fetch import fetch_url, fetch_feed, build_feed_url, Fetchresult
+from src.collector.fetch import fetch_url, fetch_feed, build_feed_url, FetchResult
 
 
 def test_successful_fetch():

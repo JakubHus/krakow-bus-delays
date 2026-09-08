@@ -52,7 +52,8 @@ def test_collect_one_feed_success_writes_file(tmp_path):
                return_value=_fake_ok_response(content)):
         result = collect_one_feed("trip_updates", "A", tmp_path)
 
-    assert result.ok is True
+    assert result.fetch_ok is True
+    assert result.parse_ok is True
     # plik danych powstał w oczekiwanej partycji
     written = list(tmp_path.rglob("*.parquet"))
     assert len(written) == 1
@@ -67,7 +68,8 @@ def test_collect_one_feed_failure_writes_nothing(tmp_path):
                side_effect=requests.exceptions.ConnectTimeout("timeout")):
         result = collect_one_feed("trip_updates", "A", tmp_path)
 
-    assert result.ok is False
+    assert result.fetch_ok is False
+    assert result.parse_ok is None
     # Żadnych plików Parquet
     assert list(tmp_path.rglob("*.parquet")) == []
 
@@ -83,7 +85,8 @@ def test_collect_one_feed_empty_feed_no_file(tmp_path):
                return_value=_fake_ok_response(content)):
         result = collect_one_feed("service_alerts", "A", tmp_path)
 
-    assert result.ok is True # pobranie się udało
+    assert result.fetch_ok is True # pobranie się udało
+    assert result.parse_ok is True
     assert list(tmp_path.rglob("*.parquet")) == [] # ale plik nie powstał
 
 
@@ -110,11 +113,11 @@ def test_run_one_cycle_all_success(tmp_path):
 
     with patch("src.collector.fetch.requests.get",
                return_value=_fake_ok_response(content)):
-        outcomes = run_one_cycle(raw_dir, logs_dir)
+        fetch_outcomes, parse_outcomes = run_one_cycle(raw_dir, logs_dir)
 
-    # 3 typy danych × 3 feedy = 9 prób
-    assert len(outcomes) == 9
-    assert all(outcomes) is True          # wszystkie udane
+    assert len(fetch_outcomes) == 9       # 9 prób pobrania
+    assert all(fetch_outcomes) is True    # wszystkie pobrania udane
+    assert all(parse_outcomes) is True    # wszystkie parsowania udane
 
     # log kompletności powstał
     log_files = list(logs_dir.rglob("poll_log.csv"))
@@ -129,10 +132,12 @@ def test_run_one_cycle_all_fail(tmp_path):
 
     with patch("src.collector.fetch.requests.get",
                side_effect=requests.exceptions.ConnectTimeout("timeout")):
-        outcomes = run_one_cycle(raw_dir, logs_dir)
+        fetch_outcomes, parse_outcomes = run_one_cycle(raw_dir, logs_dir)
 
-    assert len(outcomes) == 9
-    assert not any(outcomes)              # żadna próba się nie udała
+    assert len(fetch_outcomes) == 9
+    assert not any(fetch_outcomes)              # żadna próba pobrania się nie udała
+    # parsowań nie było wcale, więc historia parsowania jest pusta
+    assert parse_outcomes == []
     # żadnych plików danych
     assert list(raw_dir.rglob("*.parquet")) == []
     # ale log i tak powstał — z zapisem błędów
@@ -203,3 +208,23 @@ def test_run_forever_unhealthy_warns(tmp_path, caplog):
 
     # gdzieś padło ostrzeżenie o problemie z pobieraniem
     assert any("problem z pobieraniem" in msg.lower() for msg in caplog.messages)
+
+
+def test_collect_one_feed_corrupt_data_survives(tmp_path):
+    """Obcięte/wadliwe bajty → parse_ok=False, ale funkcja nie rzuca błędu"""
+    # Bajty, które nie są poprawnym protobuf GTFS-RT
+    garbage = b"\xff\xfe to nie jest protobuf \x00\x01\x02"
+
+    fake = Mock()
+    fake.content = garbage
+    fake.status_code = 200
+    fake.raise_for_status = Mock()
+
+    with patch("src.collector.fetch.requests.get", return_value=fake):
+        result = collect_one_feed("trip_updates", "A", tmp_path)
+
+    # pobranie się udało, ale parsowanie nie i to nie wywaliło funkcji
+    assert result.fetch_ok is True
+    assert result.parse_ok is False
+    # żaden plik nie powstał, bo nie było czego zapisać
+    assert list(tmp_path.rglob("*.parquet")) == []
