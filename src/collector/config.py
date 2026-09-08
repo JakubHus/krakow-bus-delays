@@ -1,5 +1,7 @@
 """Stałe konfiguracyjne kolektora GTFS-RT ZTP Kraków"""
 
+import os
+
 BASE_URL = "https://gtfs.ztp.krakow.pl"
 
 # Kody feedów według ZTP. Przypisanie do rodzaju taboru (autobusy miejskie / aglomeracyjne / tramwaje)
@@ -29,3 +31,11 @@ HEALTH_HISTORY_SIZE = 60      # ile ostatnich wyników trzymać do oceny zdrowia
 
 # --- Rozkład statyczny ---
 STATIC_CHECK_INTERVAL_SECONDS = 86400   # sprawdzaj rozkład raz na dobę (24h)
+
+# --- Powiadomienia mailowe (Gmail) ---
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+# Poniższe czytamy ze zmiennych środowiskowych
+SMTP_USER = os.environ.get("SMTP_USER")           # np. <nazwa>@gmail.com
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")   # hasło aplikacji Gmail (16 znaków)
+ALERT_TO = os.environ.get("ALERT_TO")             # dokąd wysyłać alarmy

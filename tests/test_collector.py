@@ -249,3 +249,44 @@ def test_run_forever_checks_static_on_start(tmp_path):
 
     # sprawdzenie rozkładu wywołane co najmniej raz (na starcie)
     assert mock_check.call_count >= 1
+
+
+def test_run_forever_sends_alert_on_network_failure(tmp_path):
+    """Seria błędów sieci -> wysłany zostaje alarm mailowy"""
+    import requests
+    raw_dir = tmp_path / "raw"
+    logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
+
+    with patch("src.collector.fetch.requests.get",
+               side_effect=requests.exceptions.ConnectTimeout("timeout")), \
+         patch("src.collector.collector.check_static_schedules"), \
+         patch("src.collector.collector.time.sleep"), \
+         patch("src.collector.collector.send_alert") as mock_send:
+        # dużo cykli samych błędów -> awaria wykryta, alarm wysłany
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=10)
+
+    # alarm poszedł i to dokładnie raz (nie co cykl)
+    assert mock_send.call_count == 1
+    # temat dotyczy pobierania
+    subject = mock_send.call_args[0][0]
+    assert "pobieraniem" in subject.lower()
+
+
+def test_run_forever_no_alert_when_healthy(tmp_path):
+    """Poprawne działanie -> żaden alarm nie idzie"""
+    content = _build_trip_updates_bytes()
+    raw_dir = tmp_path / "raw"
+    logs_dir = tmp_path / "logs"
+    static_dir = tmp_path / "static"
+
+    with patch("src.collector.fetch.requests.get",
+               return_value=_fake_ok_response(content)), \
+         patch("src.collector.collector.check_static_schedules"), \
+         patch("src.collector.collector.time.sleep"), \
+         patch("src.collector.collector.send_alert") as mock_send:
+        run_forever(raw_dir, logs_dir, static_dir, max_cycles=3)
+
+    mock_send.assert_not_called()
+
+    

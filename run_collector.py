@@ -10,6 +10,9 @@ import argparse
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from src.collector.collector import run_forever
 
 # Katalogi na dane i logi (względem miejsca uruchomienia)

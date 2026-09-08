@@ -26,6 +26,7 @@ from src.collector.config import (
     STATIC_CHECK_INTERVAL_SECONDS
 )
 from src.collector.static_schedule import archive_if_new
+from src.collector.notify import AlertGate, send_alert
 
 # Tabelka: typ danych → funkcja parsera.
 # Wszystkie parsery mają tę samą sygnaturę (feed, observed_at, feed_code),
@@ -160,6 +161,8 @@ def run_forever(base_dir: Path,
     # Historia ostatnich wyników (True/False) do oceny poprawności
     fetch_history: list[bool] = []
     parse_history: list[bool] = []
+    fetch_gate = AlertGate() # alarmy sieci
+    parse_gate = AlertGate() # alarmy parsowania
 
     # Flaga zatrzymania, sygnał ją podniesie, pętla ją sprawdzi
     should_stop = {"value": False}
@@ -186,11 +189,27 @@ def run_forever(base_dir: Path,
         parse_history.extend(parse_outcomes)
         parse_history = parse_history[-HEALTH_HISTORY_SIZE:]
 
-        # Ocena poprawności, na razie tylko ostrzeżenie w logu
-        if is_unhealthy(fetch_history):
-            log.warning("Wykryto problem z pobieraniem — sprawdź połączenie/ZTP")
-        if is_unhealthy(parse_history):
-            log.warning("Wykryto problem z parsowaniem — możliwa zmiana formatu feedu")
+        # Ocena działania sieci, alarm mailowy przy przejściu w awarię
+        fetch_bad = is_unhealthy(fetch_history)
+        if fetch_bad:
+            log.warning("Problem z pobieraniem - sprawdź połączenie/serwer ZTP")
+        if fetch_gate.should_alert(fetch_bad):
+            send_alert(
+                "Kolektor ZTP: problem z pobieraniem",
+                "Wykryto serię błędów pobierania danych z serwera ZTP. "
+                "Sprawdź połączenie sieciowe i dostępność gtfs.ztp.krakow.pl."
+            )
+
+        # Ocena działania parsowania, osobny alarm
+        parse_bad = is_unhealthy(parse_history)
+        if parse_bad:
+            log.warning("Problem z parsowaniem danych, możliwa zmiana formatu feedu")
+        if parse_gate.should_alert(parse_bad):
+            send_alert(
+                "kolektor ZTP: problem z parsowaniem",
+                "Wykryto serię błędów parsowania danych. "
+                "Możliwa zmiana formatu feedu GTFS-RT po stronie ZTP."
+            )
 
         # Czy minęła doba od ostatniego sprawdzenia rozkładu
         if time.time() - last_static_check >= STATIC_CHECK_INTERVAL_SECONDS:
