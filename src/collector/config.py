@@ -22,3 +22,7 @@ USER_AGENT = "krakow-bus-delays research (husjakub24@gmail.com)"
 HEALTH_MAX_CONSECUTIVE_ERRORS = 5      # tyle błędów POD RZĄD = nagła awaria
 HEALTH_WINDOW_SIZE = 15                # rozmiar okna "ostatnich N prób"
 HEALTH_MAX_ERRORS_IN_WINDOW = 8        # tyle błędów w oknie = awaria przerywana
+
+# --- Pętla kolektora ---
+POLL_INTERVAL_SECONDS = 15    # odstęp między cyklami pobierania
+HEALTH_HISTORY_SIZE = 60      # ile ostatnich wyników trzymać do oceny zdrowia

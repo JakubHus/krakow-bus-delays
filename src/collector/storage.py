@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from datetime import datetime, timezone
+import uuid
 
 import pandas as pd
 
@@ -83,14 +84,23 @@ def save_dataset(rows: list[dict],
 
     # Nazwa pliku ze znacznikiem czasu unikalnym w obrębie godziny
     dt = datetime.fromtimestamp(observed_at, tz=timezone.utc)
-    filename = f"part-{dt:%Y%m%dT%H%M%S}.parquet"
+    # Krótki losowy sufiks gwarantuje unikalność nawet przy wielu zapisach
+    # w tej samej sekundzie (np. dwa cykle o tym samym observed_at).
+    unique = uuid.uuid4().hex[:8]
+    filename = f"part-{dt:%Y%m%dT%H%M%S}-{unique}.parquet"
     final_path = partition_dir / filename
 
     # Zapis atomowy -> najpierw plik tymczasowy potem rename
     tmp_path = partition_dir / f".{filename}.tmp"
     df = pd.DataFrame(rows)
-    df.to_parquet(tmp_path, engine="pyarrow", compression="zstd", index=False)
-    tmp_path.rename(final_path)
+    try:
+        df.to_parquet(tmp_path, engine="pyarrow", compression="zstd", index=False)
+        tmp_path.rename(final_path)
+    except Exception:
+        # Nieudany zapis nie może zostawić pliku tymczasowego
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
 
     return final_path
 
