@@ -1,0 +1,18 @@
+[Unit]
+Description=Kolektor GTFS-RT ZTP Kraków
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ztp
+WorkingDirectory=/opt/ztp-collector
+ExecStart=/opt/ztp-collector/.venv/bin/python /opt/ztp-collector/run_collector.py
+Restart=always
+RestartSec=30
+
+# Hasło do maila i pozostałe sekrety w oddzielnym pliku poza repo
+EnvironmentFile=/etc/ztp-collector/collector.env
+
+[Install]
+WantedBy=multi-user.target
