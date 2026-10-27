@@ -1,0 +1,9 @@
+[Unit]
+Description=Monitor zajętej pamięci dysku kolektora ZTP
+
+[Service]
+Type=oneshot
+User=ztp
+WorkingDirectory=/opt/ztp-collector
+ExecStart=/opt/ztp-collector/.venv/bin/python /opt/ztp-collector/check_disk.py
+EnvironmentFile=/etc/ztp-collector/collector.env

@@ -1,0 +1,9 @@
+[Unit]
+Description=Codzienne sprawdzenie dysku kolektora ZTP
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
