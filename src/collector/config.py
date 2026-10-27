@@ -39,3 +39,7 @@ SMTP_PORT = 587
 SMTP_USER = os.environ.get("SMTP_USER")           # np. <nazwa>@gmail.com
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")   # hasło aplikacji Gmail (16 znaków)
 ALERT_TO = os.environ.get("ALERT_TO")             # dokąd wysyłać alarmy
+
+# --- Monitor dysku ---
+DISK_PATH = "/"                                   # monitorowana ścieżka na dysku
+DISK_THRESHOLDS = [75.0, 85.0, 92.0]              # progi alertów w procentach
